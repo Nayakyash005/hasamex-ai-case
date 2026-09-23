@@ -36,30 +36,48 @@ def get_openrouter_client() -> OpenAI:
 
 def ask_openrouter(
     prompt: str,
-    model: str = "openai/gpt-4o-mini",
-    max_tokens: int = 512,
+    model: str = "google/gemma-4-26b-a4b-it:free",
+    max_tokens: int = 350,
 ) -> str:
 
     client = get_openrouter_client()
+    models_to_try = list(dict.fromkeys([
+        model,
+        "google/gemma-3-27b-it:free",
+        "meta-llama/llama-3.1-8b-instruct:free",
+    ]))
 
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {
-                "role": "system",
-                "content": "Return only valid JSON.",
-            },
-            {
-                "role": "user",
-                "content": prompt,
-            },
-        ],
-        temperature=0.1,
-        max_tokens=max_tokens,
-        response_format={"type": "json_object"},
-    )
+    last_error = None
 
-    return response.choices[0].message.content.strip()
+    for candidate in models_to_try:
+        try:
+            response = client.chat.completions.create(
+                model=candidate,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Return only valid JSON.",
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    },
+                ],
+                temperature=0.1,
+                max_tokens=min(max_tokens, 350),
+                response_format={"type": "json_object"},
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as exc:  # pragma: no cover - safety retry path
+            last_error = exc
+            message = str(exc).lower()
+            if "429" not in message and "rate" not in message and "402" not in message and "credits" not in message:
+                raise
+
+    if last_error is not None:
+        raise last_error
+
+    raise RuntimeError("No OpenRouter model was available for this request.")
 
 
 def answer_question(query: str) -> QAResponse:
